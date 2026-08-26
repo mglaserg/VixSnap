@@ -1,0 +1,23 @@
+[project]
+name = "vixsnap"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "mglaserg", email = "mglaserg@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "numpy>=2.5.2",
+    "pandas>=3.0.5",
+    "plotly>=7.0.0",
+    "streamlit>=1.62.0",
+    "yfinance>=1.7.0",
+]
+
+[project.scripts]
+vixsnap = "vixsnap:main"
+
+[build-system]
+requires = ["uv_build>=0.12.6,<0.13.0"]
+build-backend = "uv_build"

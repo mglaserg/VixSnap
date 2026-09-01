@@ -14,7 +14,7 @@ from vixsnap.backtest import (
     threshold_surface,
     yearly_summary,
 )
-from vixsnap.data import DEFAULT_START, load_market_data
+from vixsnap.data import DEFAULT_START, load_live_indices, load_market_data
 from vixsnap.signals import CASH, LONG_SVXY, LONG_VIXY, StrategyConfig, add_signals, signal_label
 
 
@@ -24,6 +24,11 @@ st.set_page_config(page_title="VixSnap", page_icon="⚡", layout="wide")
 @st.cache_data(ttl=300, show_spinner=False)
 def get_market_data(start: str) -> pd.DataFrame:
     return load_market_data(start=start)
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def get_live_indices() -> pd.DataFrame:
+    return load_live_indices()
 
 
 def pct(x: float) -> str:
@@ -103,7 +108,46 @@ def render_timing_comparison(research, executable) -> None:
     st.dataframe(display, use_container_width=True)
 
 
-def latest_signal_panel(signals: pd.DataFrame, config: StrategyConfig) -> None:
+def live_signal_panel(live: pd.DataFrame, config: StrategyConfig) -> None:
+    current = add_signals(live, config).iloc[-1]
+    signal = current["signal"]
+
+    st.subheader("Current Cboe delayed state")
+    st.caption(
+        "Intraday watch using Cboe's delayed quote feed. This can differ sharply from the latest official daily close "
+        "and can still change before the final EOD signal."
+    )
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    c1.metric("Condition", signal_label(signal))
+    c2.metric("VIX1D", number(current["VIX1D"]))
+    c3.metric("VIX", number(current["VIX"]))
+    c4.metric("VIX3M", number(current["VIX3M"]))
+    c5.metric("VIX3M − VIX", number(current["curve_spread"]))
+
+    if signal == LONG_VIXY:
+        st.success(
+            f"**Intraday condition: LONG VIXY.** VIX1D {current['VIX1D']:.2f} is below "
+            f"{config.low_vix1d:g} and VIX ≤ VIX3M."
+        )
+    elif signal == LONG_SVXY:
+        st.success(
+            f"**Intraday condition: LONG SVXY.** VIX1D {current['VIX1D']:.2f} is above "
+            f"{config.high_vix1d:g} and VIX ≤ VIX3M."
+        )
+    else:
+        st.info("**Intraday condition: CASH.** No VixSnap entry condition is currently active.")
+
+    times = []
+    for symbol in ("VIX1D", "VIX", "VIX3M"):
+        value = current.get(f"{symbol}_time")
+        if pd.notna(value):
+            times.append(f"{symbol} {pd.Timestamp(value):%H:%M:%S}")
+    if times:
+        st.caption("Cboe quote timestamps: " + " · ".join(times))
+
+
+def eod_signal_panel(signals: pd.DataFrame, config: StrategyConfig) -> None:
     latest = signals.iloc[-1]
     signal = latest["signal"]
     signal_date = signals.index[-1]
@@ -145,7 +189,15 @@ def latest_signal_panel(signals: pd.DataFrame, config: StrategyConfig) -> None:
 
 def overview_page(market: pd.DataFrame, config: StrategyConfig, cost_bps: float) -> None:
     signals = add_signals(market, config)
-    latest_signal_panel(signals, config)
+
+    try:
+        live = get_live_indices()
+        live_signal_panel(live, config)
+    except Exception as exc:
+        st.warning(f"Current Cboe delayed quotes unavailable; showing EOD data only. ({exc})")
+
+    st.divider()
+    eod_signal_panel(signals, config)
 
     st.divider()
     left, right = st.columns([1.6, 1])

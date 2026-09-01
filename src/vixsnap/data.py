@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from io import StringIO
+import json
 from typing import Iterable
 from urllib.request import Request, urlopen
 
@@ -9,6 +10,7 @@ import yfinance as yf
 
 
 CBOE_HISTORY_URL = "https://cdn.cboe.com/api/global/us_indices/daily_prices/{symbol}_History.csv"
+CBOE_QUOTE_URL = "https://cdn.cboe.com/api/global/delayed_quotes/quotes/_{symbol}.json"
 DEFAULT_START = "2022-05-13"
 
 
@@ -18,6 +20,38 @@ def _read_url_csv(url: str) -> pd.DataFrame:
     with urlopen(req, timeout=30) as response:
         text = response.read().decode("utf-8")
     return pd.read_csv(StringIO(text))
+
+
+def _read_url_json(url: str) -> dict:
+    req = Request(url, headers={"User-Agent": "Mozilla/5.0 VixSnap/0.1"})
+    with urlopen(req, timeout=30) as response:
+        return json.load(response)
+
+
+def load_cboe_quote(symbol: str) -> dict[str, object]:
+    """Load one current Cboe delayed index quote."""
+    symbol = symbol.upper()
+    payload = _read_url_json(CBOE_QUOTE_URL.format(symbol=symbol))
+    data = payload.get("data", {})
+    if "current_price" not in data:
+        raise ValueError(f"Unexpected Cboe quote payload for {symbol}")
+
+    return {
+        "symbol": symbol,
+        "price": float(data["current_price"]),
+        "last_trade_time": pd.to_datetime(data.get("last_trade_time"), errors="coerce"),
+        "timestamp": pd.to_datetime(payload.get("timestamp"), errors="coerce"),
+    }
+
+
+def load_live_indices() -> pd.DataFrame:
+    """Load current delayed VIX1D, VIX, and VIX3M values from Cboe."""
+    row: dict[str, object] = {}
+    for symbol in ("VIX1D", "VIX", "VIX3M"):
+        quote = load_cboe_quote(symbol)
+        row[symbol] = quote["price"]
+        row[f"{symbol}_time"] = quote["last_trade_time"]
+    return pd.DataFrame([row])
 
 
 def load_cboe_index(symbol: str) -> pd.Series:
